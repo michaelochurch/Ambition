@@ -144,23 +144,23 @@ class Hand(cards:Seq[Card]) {
   private val cardSet = cards.toSet
   def toSet():Set[Card] = cardSet
   override def toString = 
-    cardSet.sortBy(c => (c.suit.id << 4) + (if (c.rank == R2) 15 else c.rank.id)).mkString("Hand(", " ", " )")
+    cardSet.toList.sortBy(c => (c.suit.id << 4) + (if (c.rank == R2) 15 else c.rank.id)).mkString("Hand(", " ", " )")
 }
 
-implicit def handToSet(h:Hand):Set[Card] = h.cards.toSet
+implicit def handToSet(h:Hand):Set[Card] = h.toSet
 
 object RoundLogic {
   val DefaultRNG = new Random()
 
   case class View (
-    playerId : Int
+    playerId : Int,
     trickNumber : Int,
     leadPos : Int,
     pointsTaken : Vector[Int],
     table : Vector[Option[Card]],
     hand : Hand)
 
-  case class State(
+  case class State (
     rng : Random,
     trickNumber : Int,
     leadPos : Int,
@@ -174,7 +174,7 @@ object RoundLogic {
     }
   }
 
-  def newRound(implicit rng:Random = DefaultRNG):Round = {
+  def newRound(implicit rng:Random = DefaultRNG):State = {
     val hands = Deck.deal(rng).map(new Hand(_)) 
     State(rng = rng,
           trickNumber = 0, leadPos = -1, pointsTaken = Vector.fill(4)(0),
@@ -182,8 +182,8 @@ object RoundLogic {
   }
 
   def legalMoves(v:View) = {
-    if (leadPos == playerId) {
-      if (trickNumber == 1) {
+    if (v.leadPos == v.playerId) {
+      if (v.trickNumber == 1) {
         // Initial lead is 8D.
         assert(v.hand.contains(Card(R8, Diamond)))
         Set(Card(R8,Diamond))
@@ -191,7 +191,7 @@ object RoundLogic {
         v.hand.toSet
       }
     } else {
-      ledSuit = v.table(leadPos).suit
+      val ledSuit = v.table(v.leadPos).get.suit
       v.hand.filter(c => c.suit == ledSuit)
     }
   }
