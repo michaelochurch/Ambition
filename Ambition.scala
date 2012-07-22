@@ -1,5 +1,15 @@
 import scala.util.Random
 
+sealed trait DisplayMode
+case object PrettyPrint extends DisplayMode    // for human users.
+case object ThreeCharAscii extends DisplayMode // human users whose consoles don't support Unicode.
+case object TwoCharAscii extends DisplayMode   // for machines / communication. 'TD' instead of '10D'.
+
+object Config {
+  // TODO: this should be a case object, not a string.
+  var displayMode = PrettyPrint
+}
+
 object Rank extends Enumeration {
   type T = Value
   val R2, R3, R4, R5, R6, R7, R8, R9, R10, RJ, RQ, RK, RA = Value
@@ -23,20 +33,24 @@ case class RankOps(r:Rank.T) {
   def isHonor():Boolean = (r >= RJ)
 }
 
-implicit def rankPimp(r:Rank.T) = RankOps(r)
+object RankOps {
+  implicit def rankPimp(r:Rank.T) = RankOps(r)
+}
+
+import RankOps.{rankPimp}
 
 case class Card(rank:Rank.T, suit:Suit.T) {
   def isHonor():Boolean = rank.isHonor
 
-  def repr(implicit format:String = "2char"):String = {
-    format match {
-      case "3char-ascii" => "%s%c".format(Rank.TwoCharReprs(rank.id), Suit.AsciiReprs(suit.id))
-      case "pretty"      => "%s%c".format(Rank.TwoCharReprs(rank.id), Suit.Reprs(suit.id))
-      case _             => "%c%c".format(Rank.OneCharReprs(rank.id), Suit.AsciiReprs(suit.id))
+  def repr(displayMode:DisplayMode):String = {
+    displayMode match {
+      case ThreeCharAscii => "%s%c".format(Rank.TwoCharReprs(rank.id), Suit.AsciiReprs(suit.id))
+      case PrettyPrint    => "%s%c".format(Rank.TwoCharReprs(rank.id), Suit.Reprs(suit.id))
+      case TwoCharAscii   => "%c%c".format(Rank.OneCharReprs(rank.id), Suit.AsciiReprs(suit.id))
     }
   }
 
-  override def toString = repr("pretty")
+  override def toString = repr(Config.displayMode)
 }
 
 class StupidHuman(msg:String) extends Exception(msg)
@@ -62,7 +76,6 @@ object CardUtils {
 
     for (c <- input) {
       c match {
-        // slow if the search is linear, but who cares?
         case ('c' | 'C' | '♣' | '♧') => setSuit(Club)
         case ('d' | 'D' | '♦' | '♢') => setSuit(Diamond)
         case ('s' | 'S' | '♠' | '♤') => setSuit(Spade)
@@ -105,6 +118,23 @@ object PointValue {
   def apply(rank:Rank.T, suit:Suit.T):Int = pointValues(suit.id)(rank.id)
   
   def apply(card:Card):Int = apply(card.rank, card.suit)
+
+  // Apologies for this ugly code.
+  def display() = {
+    val bar          = "--------------------------"
+    val suitStr      = "|    | ♦  | ♠  | ♥  | ♣  |"
+    val suitStrAscii = "|    | D  | S  | H  | C  |"
+    val crossbar     = "+----+----+----+----+----+"
+    def rankStr(rankId:Int) = "| %-2s | %2d | %2d | %2d | %2d |".format(
+      Rank.TwoCharReprs(rankId) +: (0 to 3).map(pointValues(_)(rankId)):_*)
+    println(bar)
+    if (Config.displayMode == PrettyPrint) println(suitStr) else println(suitStrAscii)
+    println(crossbar)
+    for (rid <- 12 to 9 by -1) println(rankStr(rid))
+    println(crossbar)
+    for (rid <- 8 to 0 by -1) println(rankStr(rid))
+    println(bar)
+  }
 }
 
 object Deck {
@@ -147,7 +177,11 @@ class Hand(cards:Seq[Card]) {
     cardSet.toList.sortBy(c => (c.suit.id << 4) + (if (c.rank == R2) 15 else c.rank.id)).mkString("Hand(", " ", " )")
 }
 
-implicit def handToSet(h:Hand):Set[Card] = h.toSet
+object Hand {
+  implicit def handToSet(h:Hand):Set[Card] = h.toSet
+}
+
+import Hand.{handToSet}
 
 object RoundLogic {
   val DefaultRNG = new Random()
@@ -158,8 +192,57 @@ object RoundLogic {
     leadPos : Int,
     pointsTaken : Vector[Int],
     table : Vector[Option[Card]],
-    hand : Hand)
+    hand : Hand) {
+    
+    def legalMoves():Set[Card] = {
+      if (leadPos == playerId) {
+        if (trickNumber == 1) {
+          // Initial lead is 8D.
+          assert(hand.contains(Card(R8, Diamond)))
+          Set(Card(R8,Diamond))
+        } else {  // Player in lead can play anything.
+          hand.toSet
+        }
+      } else {
+        val ledSuit = table(leadPos).get.suit
+        hand.filter(c => c.suit == ledSuit)
+      }
+    }
+  }
 
+  object DisplayView {}
+//     def display(playerId:Int) = {
+//       def spaces(n:Int) = new String(Array.fill(n)(' '))
+
+//       def cardRepr(cardOpt:Card, wasLed:Boolean, canWin:Boolean) = {
+//         val fmtString = (wasLed, canWin) match {
+//           case (true, true) => ".(%3d)."
+//           case (true, false) => " .%3d. "
+//           case (false, true) => " (%3d) "
+//           case (false, false) => "  %3d  "
+//         }
+//         fmtString.format(card match {
+//           case Some(card) => card.toString
+//           case None => ".?."
+//         })
+//       }
+
+//       val trickNumberStr = "Trick %d of 13\n".format(v.trickNumber)
+//       val youAreStr      = "              " + spaces(8 * playerId) + " ↓You↓ "
+//       val pointsTakenStr = "Points taken:   %3d    %3d    %3d    %3d".format(pointsTaken:_*)
+//       // TODO: fix this. 
+//       val onTableStr     = "on table    : %7s %7s %7s %7s".format(table.map(cardRepr(_, false, false)))
+//       val yourHandStr    = "Your hand: " + v.hand.toString
+//       val legalMovesStr  = "Legal moves are: " legalMoves.mkString(", ")
+//       println(trickNumberStr)
+//       println(youAreStr)
+//       println(pointsTakenStr)
+//       println(onTableStr)
+//       println(yourHandStr)
+//       println(legamoMovesStr)
+//     }
+//   }
+  
   case class State (
     rng : Random,
     trickNumber : Int,
@@ -181,18 +264,27 @@ object RoundLogic {
           table = Vector.fill(4)(None), hands = hands)
   }
 
-  def legalMoves(v:View) = {
-    if (v.leadPos == v.playerId) {
-      if (v.trickNumber == 1) {
-        // Initial lead is 8D.
-        assert(v.hand.contains(Card(R8, Diamond)))
-        Set(Card(R8,Diamond))
-      } else {  // Player in lead can play anything.
-        v.hand.toSet
-      }
-    } else {
-      val ledSuit = v.table(v.leadPos).get.suit
-      v.hand.filter(c => c.suit == ledSuit)
+  trait TrickStrategy extends Function1[View, Card]
+
+  class RandomLegalMove(private val rng:Random) extends TrickStrategy {
+    def apply(v:View):Card = {
+      val legalMoves = v.legalMoves.toArray
+      val idx = (rng.nextDouble() * legalMoves.length).toInt
+      legalMoves(idx)
     }
+  }
+
+  class FromConsole extends TrickStrategy {
+    def apply(v:View) = {
+      throw new Exception("not implemented yet")
+    }
+  }
+}
+
+object Ambition extends App {
+  override def main(args:Array[String]) = {
+    print("--> ")
+    val line = Console.readLine
+    println("You gave me: " + line)
   }
 }
