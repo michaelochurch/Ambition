@@ -13,6 +13,7 @@ object Config {
   var displayMode = Unicode
   var noviceMode  = true
   var displayTricks = true
+  var humanPlayer = true
 }
 
 object Rank extends Enumeration {
@@ -236,10 +237,13 @@ object Hand {
 
 import Hand.{handToSet}
 
+object DefaultRNG {
+  val rng = new Random()
+  def apply() = rng
+}
+
 // TODO: Break up this giant object. 
 object RoundLogic {
-  val DefaultRNG = new Random()
-
   case class View (
     playerId : Int,
     trickNumber : Int,
@@ -277,7 +281,7 @@ object RoundLogic {
       }
       fmtString.format(cardOpt match {
         case Some(card) => card.toString
-        case None       => "-?-"
+        case None       => "-??-"
       })
     }
 
@@ -296,6 +300,7 @@ object RoundLogic {
                Vector.fill(5)("").updated(v.playerId + 1, youAreHere),
                "Pts. taken:" +: (0 to 3).map(i => v.pointsTaken(i).toString) :+ "(%d left)".format(ptsLeft),
                "On table:  " +: (0 to 3).map(i => cardRepr(v.table(i), i == leadIdx, Some(i) == winningIdx))))
+    println()
     println(tableStr)
     println("Your hand: " + v.hand)
   }
@@ -319,7 +324,7 @@ object RoundLogic {
 
   def threeRandomsAndConsole(rng: Random) = (new FromConsole) +: Vector.fill(3)(new RandomLegalMove(rng))
 
-  def newRound(rng:Random = DefaultRNG)(implicit strategies:Vector[TrickStrategy] = fourRandoms(rng)):State = {
+  def newRound(rng:Random = DefaultRNG())(implicit strategies:Vector[TrickStrategy] = fourRandoms(rng)):State = {
     val hands = Deck.deal(rng).map(new Hand(_))
     State(strategies = strategies,
           rng = rng,
@@ -438,17 +443,42 @@ object RoundLogic {
     }
   }
 
+  def evaluate(rs:State):Vector[Int] = {
+    val scores = rs.pointsTaken
+    val most   = scores.max
+    val slam   = most >= 75
+    val nils   = scores.count(_ == 0)
+    val under  = scores.exists(x => x < 15 && x > 0)
+    val nilValue = 
+      (slam, nils, under) match {
+        case (true, (2 | 3), _    ) =>  0
+        case (true, 1, false)       =>  0
+        case (true, 1, true)        => 30
+        case (false, 2, _)          => 15
+        case (false, 1, _)          => 30
+        case _                      => 30 // irrelevant.
+      }
+    scores.map(x => 
+      if      (x >= 75)            60  // Slam
+      else if (!slam && x == most)  0  // Overstrike
+      else if (x == 0)       nilValue  // Nil   
+      else if (x < 15)              x  // Understrike
+      else                          x)
+  }
+
   def playARound() = {
-    var state = newRound()
+    var state = newRound()(
+      if (Config.humanPlayer) threeRandomsAndConsole(DefaultRNG())
+      else fourRandoms(DefaultRNG()))
     while (!isTerminal(state)) {
       state = step(state)
     }
-    state
+    evaluate(state)
   }
 }
 
 object Ambition extends App {
   override def main(args:Array[String]) = {
-    
+    RoundLogic.playARound
   }
 }
