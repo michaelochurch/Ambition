@@ -43,17 +43,157 @@ object Display {
       case 7 => White(bold)
     }
   }
-  
-  def colored(text:String, color:Color) = {
-    textColor(color) + text + Console.RESET
-  }
-  
-  def main(args:Array[String]) = {
-    for (i <- 0 to 15) {
-      println(colored("%02d".format(i), colorById(i)))
+ 
+  case class MarkupSegment(text:String, colorOpt:Option[Color]) {
+    def length = text.length
+    def display = colorOpt match {
+      case Some(color) => textColor(color) + text + Console.RESET
+      case None        => text
     }
   }
-}
+
+  sealed trait Alignment
+  case object Left extends Alignment
+  case object Right extends Alignment
+  case object Center extends Alignment
+  case object Default extends Alignment
+
+  def spaces(n:Int) = {
+    if (n > 0)
+      new String(Array.fill(n)(' '))
+    else ""
+  }
+
+  case class MarkupCell(alignment:Alignment, segments:MarkupSegment*) {
+    val length = segments.map(_.length).sum
+
+    def text = segments.map(_.text) mkString
+
+    def content = segments.map(_.display) mkString
+
+    def displayLeft(size:Int) = {
+      content + spaces(size - length)
+    }
+
+    def displayRight(size:Int) = {
+      spaces(size - length) + content
+    }
+
+    def displayCenter(size:Int) = {
+      val n = size - length
+      spaces((n + 1) / 2) + content + content(n / 2)
+    }
+
+    private def looksNumeric(s:String) = {
+      (s.length > 1) && (s(0) == '-' || s(0) == '+' || s(0).isDigit) && 
+      (s.drop(1).forall(c => c.isDigit || c == '.'))
+    }
+
+    def display(size:Int) = {
+      val content = segments.map(_.display).mkString
+
+      alignment match {
+        case Left    => displayLeft(size)
+        case Right   => displayRight(size)
+        case Center  => displayCenter(size)
+        case Default => if (looksNumeric(text)) displayRight(size) else displayLeft(size)
+      }
+    }
+  }
+  
+  sealed trait MarkupRow {
+    def lengths:Seq[Int]
+  }
+  
+  case class Bar(ch:Char, left:String, sep:String, right:String) extends MarkupRow {
+    def lengths = Seq[Int]()
+  }
+
+  case class DataRow(cells:MarkupCell*) extends MarkupRow {
+    def lengths = cells.map(_.length)
+  }
+
+  case class LiteralString(s:String) extends MarkupRow {
+    def lengths = Seq[Int]()
+  }
+
+  case class Table(rows:MarkupRow*) {
+    private def maxLenVectors(v1:Seq[Int], v2:Seq[Int]) = {
+      val maxLen = v1.length max v2.length
+      (0 until maxLen).map(i => (v1.lift(i), v2.lift(i)) match {
+        case (Some(n1), Some(n2)) => n1 max n2
+        case (Some(n1), None)     => n1
+        case (None    , Some(n2)) => n2
+        case _                    => 0
+      })
+    }
+
+    def display(columnLengths:Seq[Int] = Seq(), left:String = " ", sep:String = " ", right:String = " ") = {
+      val actualColumnLengths = rows.foldLeft(columnLengths)((v, row) => maxLenVectors(v, row.lengths))
+      val builder = new StringBuilder
+      for (row <- rows) {
+        row match {
+          case LiteralString(s) => builder.append(s)
+          case Bar(char, left, sep, right) => {
+            val s = actualColumnLengths.map(n => new String(Array.fill(n)(char))).mkString(left, sep, right)
+            builder.append(s)
+          }
+          case DataRow(rows@_*) => {
+            val s = {
+              actualColumnLengths.zip(rows).map {
+                case (len, cell) => 
+                  cell.display(len)
+                }.mkString(left, sep, right)
+            }
+            builder.append(s)
+          }
+        }
+        builder.append("\n")
+      }
+      builder.toString
+    }
+  }
+
+  def clearScreen() = {
+    print("\033[2J\033[;H")
+  }
+
+  val colorsBySym = Map("K" -> Black(false), "K+" -> Black(true), "R" -> Red(false), "R+" -> Red(true),
+                        "G" -> Green(false), "G+" -> Green(true), "Y" -> Yellow(false), "Y+" -> Yellow(true),
+                        "B" -> Blue(false), "B+" -> Blue(true), "M" -> Magenta(false), "M+" -> Magenta(true),
+                        "C" -> Cyan(false), "C+" -> Cyan(true), "W" -> White(false), "W+" -> White(true))
+
+  implicit def seg(s:String):MarkupSegment = MarkupSegment(s, None)
+
+  def seg(s:String, colorInt:Int):MarkupSegment = MarkupSegment(s, Some(colorById(colorInt)))
+  
+  def seg(s:String, colorSym:String):MarkupSegment = {
+    colorsBySym.get(colorSym) match {
+      case Some(color) => MarkupSegment(s, Some(color))
+      case None        => throw new Exception("bad color string: " + colorSym)
+    }
+  }
+
+  def seg(s:String, color:Color):MarkupSegment = MarkupSegment(s, Some(color))
+
+  def lCell(segs:MarkupSegment*) = MarkupCell(Left, segs:_*)
+
+  def rCell(segs:MarkupSegment*) = MarkupCell(Right, segs:_*)
+
+  def cCell(segs:MarkupSegment*) = MarkupCell(Center, segs:_*)
+
+  def cell(segs:MarkupSegment*) = MarkupCell(Default, segs:_*)
+
+  def main(args:Array[String]) = {
+    clearScreen()
+    for (i <- 0 to 15) {
+      println(seg("%02d".format(i), i).display)
+    }
+    val t = Table(DataRow(cell("cats"), cell("dogs")),
+                  DataRow(cell(seg("22", "R+")), cell(seg("45", "B"))))
+    println(t.display())
+  }
+}            
 
 // This is what client code will look like...
 
