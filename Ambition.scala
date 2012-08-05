@@ -7,11 +7,6 @@ import Suit.{Diamond, Spade, Heart, Club}
 import java.io.{File, PrintWriter}
 
 object Ambition {
-  object Config {
-    val displayMode = Unicode
-    val coloringMode = FourColor
-  }
-
   object PointValues {
     private[this] def isHonor(r:Rank.T) = r >= RJ
 
@@ -32,7 +27,7 @@ object Ambition {
     def apply(card:Card):Int = apply(card.rank, card.suit)
   }
 
-  case class Trick(leadPos: Int, cards: Vector[Option[Card]]) {
+  case class Trick(number: Int, leadPos: Int, cards: Vector[Option[Card]]) {
     def activePlayer = {
       (0 to 3).map(i => (i + leadPos) % 4).find(cards(_) == None)
     }
@@ -40,7 +35,11 @@ object Ambition {
     def isComplete = {
       cards.forall(_ != None)
     }
-    
+ 
+    def isEmpty = {
+      cards.forall(_ == None)
+    }
+   
     def play(pos:Int, card:Card):Trick = {
       assert(cards(pos) == None)
       copy(cards = cards.updated(pos, Some(card)))
@@ -77,7 +76,7 @@ object Ambition {
               c.rank.id
           } else -100
         }
-        case None   => -100
+        case None   => (if (i == leadPos) -100 else -200)
       })
     }
 
@@ -94,9 +93,11 @@ object Ambition {
     
     def toSet():Set[Card] = cardSet
 
-    // TODO: Put coloring into this. 
+    def toVector():Vector[Card] = 
+      (Vector() ++ cards).sortBy(c => (c.suit.id << 4) + (if (c.rank == R2) 15 else c.rank.id))
+
     override def toString = 
-      cardSet.toList.sortBy(c => (c.suit.id << 4) + (if (c.rank == R2) 15 else c.rank.id)).mkString("  ")
+      toVector() mkString " "
 
     def asciiRepr = cards.map(_.twoChar).mkString("-")
 
@@ -105,6 +106,7 @@ object Ambition {
       new CardSet((cardSet - card).toSeq)
     }
 
+    // For data collection. 
     def csvLine = {
       val vec = {
         (asciiRepr +: (for (r <- CardUtils.Rank.values.toList;
@@ -133,6 +135,7 @@ object Ambition {
     pointsTaken : Vector[Int],
     lastTrick : Option[Trick],
     thisTrick : Trick,
+    // TODO: investigate getting rid of .winnerSoFar. It's redundant. 
     winnerSoFar : Int,
     hand : CardSet) {
    
@@ -164,21 +167,59 @@ object Ambition {
   // ask a human. 
   trait TrickStrategy extends Function1[RoundView, Card] {
     val id : String
-  }
-
-  class RandomLegalMove(private val rng:Random) extends TrickStrategy {
-    val id = "2012/07/29-Random"
-    def apply(v:RoundView):Card = {
+    def randomLegalMove(v:RoundView, rng:Random) = {
       val legalMoves = v.legalMoves.toArray
       val idx = (rng.nextDouble() * legalMoves.length).toInt
       legalMoves(idx)
     }
   }
 
-  class FromConsole extends TrickStrategy {
+  class RandomLegalMove(private val rng:Random) extends TrickStrategy {
+    val id = "2012/07/29-Random"
+    def apply(v:RoundView):Card = {
+      randomLegalMove(v, rng)
+    }
+  }
+
+  object FromConsole extends TrickStrategy {
     val id = "2012/07/29-FromConsole"
-    def apply(v:RoundView) = {
-      throw new Exception("not implemented")
+    def apply(v:RoundView):Card = {
+      Display.clearScreen()
+      AmbitionDisplay.printView(v)
+
+      def loop():Card = {
+        print(" Your move?  ")
+        val input = readLine()
+        println()
+        val move = 
+          try {
+            val card = CardUtils.cardOfHumanInput(input)
+            if (v.legalMoves.contains(card)) {
+              Some(card)
+            } else {
+              println(" I know what that card is but it's not a legal play.")
+              println(" (1) You can only play a card that you hold in your hand.")
+              println(" (2) If able to follow suit (play a card in led suit) you must.")
+              println(" (3) You must lead a Diamond to the first trick, and the 8D if it was not passed to you.")
+              println(" Legal input might look like this: " + randomLegalMove(v, DefaultRNG()).toString)
+              println()
+              None
+            }
+          } catch {
+            case (e:IllegalArgumentException) => {
+              println(" I don't know how to parse that as a card: " + input)
+              println(" Legal input might look like this: " + randomLegalMove(v, DefaultRNG()).toString)
+              println()
+              None
+            }
+          }
+        move match {
+          case Some(card) => card
+          case None       => loop()
+        }
+      }
+
+      loop()
     }
   }
 
@@ -193,8 +234,9 @@ object Ambition {
     trickHistory : Vector[Option[Trick]],
     hands : Vector[CardSet]) {
     
-    private def newTrick(leadPos:Int):Trick = {
-      Trick(leadPos = leadPos,
+    private def newTrick(number:Int, leadPos:Int):Trick = {
+      Trick(number = number,
+            leadPos = leadPos,
             cards = Vector(None, None, None, None))
     }
 
@@ -221,7 +263,7 @@ object Ambition {
     def find8D():RoundState = {
       val newLeadPos = hands.indexWhere(_.contains(Card(R8, Diamond)))
       this.copy(trickNumber = 1, leadPos = newLeadPos,
-                trickHistory = trickHistory.updated(0, Some(newTrick(newLeadPos))))
+                trickHistory = trickHistory.updated(0, Some(newTrick(1, newLeadPos))))
     }
 
     def playCard(pos:Int, card:Card):RoundState = {
@@ -237,7 +279,7 @@ object Ambition {
                 pointsTaken  = pointsTaken.updated(trickWinner, pointsTaken(trickWinner) + trickValue),
                 trickHistory = {
                   if (trickNumber < 13)
-                    trickHistory.updated(trickNumber, Some(newTrick(trickWinner)))
+                    trickHistory.updated(trickNumber, Some(newTrick(trickNumber + 1, trickWinner)))
                   else trickHistory})
     }
 
@@ -260,6 +302,9 @@ object Ambition {
 
   def fourRandoms(rng:Random) = 
     Vector.fill(4)(new RandomLegalMove(rng))
+
+  def threeRandomsPlusConsole(rng:Random) = 
+    FromConsole +: Vector.fill(3)(new RandomLegalMove(rng))
 
   def startRound(rng:Random = DefaultRNG())(
     implicit strategies:Vector[TrickStrategy] = fourRandoms(rng)):RoundState = {
@@ -323,9 +368,6 @@ object Ambition {
     def statRound(handSetId:Int, hands:Vector[CardSet]) = {
       val initState = startRoundWithHands(hands)
       val endState = playARound(initState)
-//      for (Some(trick) <- endState.trickHistory) {
-//        tricksWriter.write(trick.csvLine)
-//      }
       tricksWriter.write(endState.trickHistory.map(trick => trick.get.pointValue).mkString("", ",", "\n"))
       val ptsTaken = endState.pointsTaken
       val ptsScored = scoreRound(endState)
@@ -367,6 +409,9 @@ object Ambition {
   }
 
   def main(args:Array[String]) = {
-    handScoringExperiment(1600, 1000, DefaultRNG())
+    val rng = DefaultRNG()
+    val initRoundState = startRound(rng)(threeRandomsPlusConsole(rng))
+    playARound(initRoundState)
+    //handScoringExperiment(1600, 1000, DefaultRNG())
   }
 }

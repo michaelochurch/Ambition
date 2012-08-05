@@ -44,7 +44,7 @@ object Display {
     }
   }
  
-  case class MarkupSegment(text:String, colorOpt:Option[Color]) {
+  case class MarkupSegment(text:String, colorOpt:Option[Color] = None) {
     def length = text.length
     def display = colorOpt match {
       case Some(color) => textColor(color) + text + Console.RESET
