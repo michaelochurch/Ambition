@@ -64,6 +64,7 @@ object AmbitionDisplay {
     MarkupSegment(cardStr, None)
   }
 
+  // The finished parameter is to be used when displaying a round after it's over.
   def rowOfTrick(trick:Ambition.Trick, config:Config = DefaultConfig):MarkupRow = {
     def cardCell(cardOpt:Option[Card], lead:Boolean, winner:Boolean) = {
       val (left, right) = {
@@ -82,12 +83,26 @@ object AmbitionDisplay {
     }
     val winnerPos = if (trick.isEmpty) -1 else trick.winner
     val trickNumberCell = MarkupCell(Right, "%2d.".format(trick.number))
-    val pointsCell = MarkupCell(Center, 
-                                MarkupSegment("("), 
-                                MarkupSegment("%3d".format(trick.pointValue), Some(Cyan(true))),
-                                if (trick.pointValue != 1) 
-                                  MarkupSegment(" pts. )")
-                                else MarkupSegment(" pt. ) "))
+    val finished = trick.finished != None
+    val pointsCell = {
+      val segments = {
+        Vector(MarkupSegment("("),
+               MarkupSegment("%3d".format(trick.pointValue), Some(Cyan(true)))) ++
+        (if (!finished) {
+          if (trick.pointValue != 1) 
+            Vector(MarkupSegment(" pts. )"))
+          else Vector(MarkupSegment(" pt. ) "))
+        } else {
+          val Some(trickResult) = trick.finished
+          Vector(if (trick.pointValue != 1) MarkupSegment(" pts. : ") else MarkupSegment(" pt.  : "),
+                 MarkupSegment("%3d".format(trickResult.oldScore), Some(Cyan(true))),
+                 MarkupSegment(" -> "),
+                 MarkupSegment("%3d".format(trickResult.newScore), Some(Cyan(true))),
+                 MarkupSegment(")"))
+        })
+      }
+      MarkupCell(Left, segments:_*)
+    }
     val cardCells = trick.cards.zipWithIndex map { 
       case (cardOpt, idx) => 
         cardCell(cardOpt, idx == trick.leadPos, idx == winnerPos)
@@ -96,7 +111,7 @@ object AmbitionDisplay {
     DataRow(cells:_*)
   }
 
-  def topTableOfView(v:Ambition.RoundView, config:Config = DefaultConfig) = {
+  private def topTableOfView(v:Ambition.RoundView, config:Config = DefaultConfig) = {
     val youAreHereSym = config.cardDisplayMode match {
       case Unicode => "↓You ↓"
       case ThreeCharAscii => "You"
@@ -113,7 +128,7 @@ object AmbitionDisplay {
         val color = {
           if (pts >= 75)
             Some(Magenta(true))
-          else if ((pts == 0) || (pts > 15 && ((pts < mostPts) || (pts <= 30)))) 
+          else if ((pts == 0) || (pts >= 15 && ((pts < mostPts) || (pts <= 30)))) 
             Some(Green(true))
           else Some(Red(false))
         }
@@ -123,7 +138,7 @@ object AmbitionDisplay {
         (scoreCells :+ MarkupCell(Left, 
                                   MarkupSegment("("),
                                   MarkupSegment("%3d".format(pointsLeft), Some(Cyan(true))),
-                                  MarkupSegment(" left.)")))
+                                  MarkupSegment(" left)")))
       DataRow(cells:_*)
     }
    
@@ -149,10 +164,11 @@ object AmbitionDisplay {
     Table((lastTrickRows ++ thisTrickRows):_*)
   }
 
-  def bottomTableOfView(v:Ambition.RoundView, config:Config = DefaultConfig) = {
+  private def bottomTableOfView(v:Ambition.RoundView, config:Config = DefaultConfig) = {
     val legalPlays = v.legalMoves.toVector
     Table(DataRow( (MarkupCell(Left, MarkupSegment("Your hand: ")) +: v.hand.toVector.map(card => 
                     MarkupCell(Center, displayCard(card, config)))):_*),
+          LiteralString(""),
           DataRow( (MarkupCell(Left, MarkupSegment("Legal plays: ")) +: legalPlays.map(card => 
                     MarkupCell(Center, displayCard(card, config)))):_*),
           DataRow( (MarkupCell(Left, MarkupSegment("")) +: legalPlays.map(card => 
@@ -166,8 +182,22 @@ object AmbitionDisplay {
     println(bottomTableOfView(v, config).display())
   }
 
+  private def viewTableForPassing(v:Ambition.RoundView, config:Config = DefaultConfig) = {
+    Table(DataRow( (MarkupCell(Left, MarkupSegment("Your hand: ")) +: v.hand.toVector.map(card => 
+                    MarkupCell(Center, displayCard(card, config)))):_*),
+          LiteralString(""))
+  }
+
+  private def trickHistoryTable(rs:Ambition.RoundState, config:Config = DefaultConfig) = {
+    Table(rs.trickHistory.map(trickOpt => rowOfTrick(trickOpt.get)):_*)
+  }
+
+  def printTrickHistory(rs:Ambition.RoundState, config:Config = DefaultConfig) = {
+    println(trickHistoryTable(rs, config).display())
+  }
+
   def main(args:Array[String]) = {
-    val t = Ambition.Trick(number = 5, leadPos = 2,
+    val t = Ambition.Trick(number = 5, leadPos = 2, finished = None,
                            cards = Vector(Some(Card(R2, Heart)), None, 
                                           Some(Card(RJ, Heart)), Some(Card(R8, Spade))))
 
