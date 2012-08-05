@@ -81,7 +81,7 @@ object Display {
 
     def displayCenter(size:Int) = {
       val n = size - length
-      spaces((n + 1) / 2) + content + content(n / 2)
+      spaces((n + 1) / 2) + content + spaces(n / 2)
     }
 
     private def looksNumeric(s:String) = {
