@@ -8,6 +8,10 @@ object Experiments {
     val tricksWriter = new PrintWriter (new File ("tricks.txt"))
     val resultsWriter = new PrintWriter (new File ("results.txt"))
 
+    def scoreRound(roundState:RoundState) = {
+      evaluateRound(roundState).pointsScored
+    }
+
     def statRound(handSetId:Int, hands:Vector[CardSet]) = {
       val initState = startRoundWithHands(hands)
       val endState = playARound(initState)

@@ -165,12 +165,11 @@ object Ambition {
       val leadPos = thisTrick.get.leadPos
       if (leadPos == playerId) {
         if (trickNumber == 1) {
-          // Initial lead is 8D...
-          // ...unless it was passed, but I'm not handling passing yet. 
           assert(hand.contains(Card(R8, Diamond)))
-          if (d8WasPassed) println("WARNING: passed 8D not handled correctly yet.")
-          CardSet(Vector(Card(R8,Diamond)))
-        } else {  // Player in lead can play anything.
+          if (d8WasPassed) 
+            CardSet(hand.filter(c => c.suit == Diamond))
+          else CardSet(Vector(Card(R8,Diamond)))
+        } else {  // Tricks 2-13: Player in lead can play anything.
           hand
         }
       } else {
@@ -300,8 +299,7 @@ object Ambition {
                     trickHistory.updated(trickNumber, Some(newTrick(trickNumber + 1, trickWinner)))
                   else trickHistory}).markTrickFinished(trickNumber, previousScore = pointsTaken(trickWinner))
     }
-
-    // Left off here. 
+ 
     private def performPass(fromPlayer: Int, passingType: PassingType,
                             cards:(Card, Card, Card)) : RoundState = {
       val cardsVector = Vector(cards._1, cards._2, cards._3)
@@ -309,7 +307,15 @@ object Ambition {
         case PassLeft => passingSpace.updated((fromPlayer + 3) % 4, cardsVector)
         case PassRight => passingSpace.updated((fromPlayer + 1) % 4, cardsVector)
         case PassAcross => passingSpace.updated((fromPlayer + 2) % 4, cardsVector)
-        case ScatterPass => throw new Exception("not implemented")
+        case ScatterPass => {
+          passingSpace.updateWith((fromPlayer + 3) % 4) { v => 
+            v.updated(2, cards._1)
+          }.updateWith((fromPlayer + 2) % 4) { v => 
+            v.updated(1, cards._2)
+          }.updateWith((fromPlayer + 1) % 4) { v => 
+            v.updated(0, cards._3)
+          }
+        }
       }
       this.copy(roundTime = AwaitingPass(fromPlayer + 1),
                 passingSpace = newPassingSpace,
@@ -359,25 +365,134 @@ object Ambition {
     }
   }
 
+  object RoundState {
+    def start(rng:Random, roundNumber:Int, strategies:Vector[AmbitionStrategy]) = {
+      val hands = Deck.deal(rng).map(new CardSet(_))
+      RoundState(strategies = strategies,
+                 rng = rng,
+                 roundNumber = roundNumber,
+                 passingType = PassingType(roundNumber),
+                 roundTime = AwaitingPass(0),
+                 leadPos = 0,
+                 pointsTaken = Vector.fill(4)(0),
+                 trickHistory = Vector.fill(13)(None),
+                 hands = hands)
+    }
+  }
+
+  case class RoundResult(pointsTaken:Vector[Int],
+                         slams:Vector[Boolean],
+                         nils:Vector[Boolean],
+                         understrikes:Vector[Boolean],
+                         overstrikes:Vector[Boolean],
+                         nilstrikes:Vector[Boolean],
+                         pointsScored:Vector[Int],
+                         strikes:Vector[Boolean])
+
+  // TODO: ignoring "pardon" rule for now. Include it. 
+  def evaluateRound(state:RoundState):RoundResult = {
+    val pointsTaken = state.pointsTaken
+    val most = pointsTaken.max
+    val slamOccurred = most >= 75
+    val numberOfNils = pointsTaken.count(_ == 0)
+    val underOccurred = pointsTaken.exists(x => 0 < x && x < 15)
+    val (nilValue, nilIsStrike) =
+      (slamOccurred, numberOfNils, underOccurred) match {
+        case (true, (2 | 3), _)  => (0, true)
+        case (true, 1, false)    => (0, true)
+        case (true, 1, true)     => (30, false)
+        case (false, 2, _)       => (15, false)
+        case (false, 1, _)       => (30, false)
+        case _                   => (30, false)  // ... but irrelevant. 
+      }
+    val slams = pointsTaken.map(_ >= 75)
+    val nils = pointsTaken.map(_ == 0)
+    val understrikes = pointsTaken.map(x => 0 < x && x < 15)
+    val overstrikes = pointsTaken.map(_ == most)
+    val nilstrikes = pointsTaken.map(nilIsStrike && _ == 0)
+    val strikes = understrikes.zip(overstrikes).zip(nilstrikes).map {
+      case ((u, o), n) => u || o || n
+    }
+    val pointsScored = pointsTaken.map(x => 
+      if      (x >= 75)            60  // Slam
+      else if (!slamOccurred && 
+                        x == most)  0  // Overstrike
+      else if (x == 0)       nilValue  // Nil   
+      else if (x < 15)              x  // Understrike
+      else                          x)
+    RoundResult(pointsTaken, slams, nils, understrikes, overstrikes, nilstrikes, 
+                pointsScored, strikes)
+  }
+
+  sealed trait GameTime
+  case class BeforeRound(n:Int) extends GameTime
+  case class DuringRound(n:Int) extends GameTime
+
+  case class GameState(scores : Vector[Int],
+                       strikes : Vector[Int],
+                       rng : Random,
+                       strategies : Vector[AmbitionStrategy],
+                       thisRound : Option[RoundState],
+                       roundHistory : Vector[RoundResult],
+                       gameTime : GameTime) {
+    
+    def isTerminal = strikes.exists(_ >= 4)
+    
+    def startRound(n:Int) = {
+      roundState = RoundState.start(rng, n, strategies)
+      this.copy(thisRound = roundState,
+                gameTime = DuringRound(n))
+    }
+
+    def finishRound():GameState = {
+      val roundResult = evaluateRound(thisRound.get)
+      val newScores = scores.zip(roundResult.pointsScored).map {
+        case (oldScore, roundScore) => oldScore + roundScore
+      }
+      val newStrikes = strikes.zip(roundResult.strike).map {
+        case (oldStrikes, strike) => oldStrikes + (if (strike) 1 else 0)
+      }
+      val roundNumber = thisRound.get.roundNumber
+      
+      this.copy(scores = newScores,
+                strikes = newStrikes,
+                thisRound = None,
+                roundHistory = roundHistory :+ roundResult,
+                gameTime = BeforeRound(roundNumber + 1))
+    }
+
+    def step():GameState = {
+      gameTime match {
+        case BeforeRound(n) => startRound(n)
+        case DuringRound(_) => {
+          roundState = thisRound.get
+          if (roundState.isTerminal) 
+            finishRound
+          else 
+            this.copy(thisRound = Some(roundState.step))
+        }
+      }
+    }
+  }
+
+  object GameState {
+    def start(rng:Random = DefaultRNG())(
+      strategies:Vector[AmbitionStrategy] = threeRandomsPlusConsole(rng)) = {
+        GameState(scores = Vector(0, 0, 0, 0),
+                  strikes = Vector(0, 0, 0, 0),
+                  rng = rng,
+                  strategies = strategies,
+                  thisRound = None,
+                  roundHistory = Vector[RoundResult](),
+                  gameTime = BeforeRound(1))                  
+    }
+  }
+
   def fourRandoms(rng:Random) = 
     Vector.fill(4)(new RandomPlayer(rng))
 
   def threeRandomsPlusConsole(rng:Random) = 
     ConsolePlayer +: Vector.fill(3)(new RandomPlayer(rng))
-
-  def startRound(rng:Random = DefaultRNG(), roundNumber:Int = 1)(
-    implicit strategies:Vector[AmbitionStrategy] = fourRandoms(rng)):RoundState = {
-    val hands = Deck.deal(rng).map(new CardSet(_))
-    RoundState(strategies = strategies,
-               rng = rng,
-               roundNumber = roundNumber,
-               passingType = PassingType(roundNumber),
-               roundTime = AwaitingPass(0),
-               leadPos = 0, 
-               pointsTaken = Vector.fill(4)(0),
-               trickHistory = Vector.fill(13)(None), 
-               hands = hands)
-  }
   
   def startRoundWithHands(hands:Vector[CardSet])(
     implicit strategies:Vector[AmbitionStrategy] = fourRandoms(DefaultRNG())):RoundState = {
@@ -395,7 +510,7 @@ object Ambition {
   val demoHands = Vector(CardSet.ofString("4d qd 2d 3s 5s ks 2s 7h ah 2h tc kc 2c"),
                          CardSet.ofString("6d 7d 8d ts qs 5h th jh 3c 5c 6c qc ac"),
                          CardSet.ofString("3d 5d kd ad 4s 7s js as 3h 8h 9h 9c jc"),
-                         CardSet.ofString("9d td jd 6s 8s 9s 4h 6h qh kh 4c 7c 8c"))                                          
+                         CardSet.ofString("9d td jd 6s 8s 9s 4h 6h qh kh 4c 7c 8c"))
 
   // Gives the demo. player a nice-looking hand. 
   def demoRoundState() = {
@@ -419,33 +534,10 @@ object Ambition {
     state
   }
 
-  def scoreRound(state:RoundState):Vector[Int] = {
-    val scores = state.pointsTaken
-    val most   = scores.max
-    val slam   = most >= 75
-    val nils   = scores.count(_ == 0)
-    val under  = scores.exists(x => x < 15 && x > 0)
-    val nilValue = 
-      (slam, nils, under) match {
-        case (true, (2 | 3), _    ) =>  0
-        case (true, 1, false)       =>  0
-        case (true, 1, true)        => 30
-        case (false, 2, _)          => 15
-        case (false, 1, _)          => 30
-        case _                      => 30 // irrelevant.
-      }
-    scores.map(x => 
-      if      (x >= 75)            60  // Slam
-      else if (!slam && x == most)  0  // Overstrike
-      else if (x == 0)       nilValue  // Nil   
-      else if (x < 15)              x  // Understrike
-      else                          x)
-  }
-
   def main(args:Array[String]) = {
     val rng = DefaultRNG()
     val initRoundState =
-      startRound(rng)(threeRandomsPlusConsole(rng))
+      RoundState.start(rng, 1, threeRandomsPlusConsole(rng))
     val endRoundState = playARound(initRoundState)
     AmbitionDisplay.printTrickHistory(endRoundState)
     //handScoringExperiment(1600, 1000, DefaultRNG())

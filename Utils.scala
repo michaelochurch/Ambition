@@ -22,10 +22,11 @@ object Utils {
     array.take(k)
   }
 
-  case class VectorPimp[+T](x:Vector[T]) {
+  case class VectorPimp[+T](vector:Vector[T]) {
     def updateWith[U >: T](n:Int)(f:(T => U)):Vector[U] = {
-      x.updated(n, f(x(n)))
+      vector.updated(n, f(vector(n)))
     }
   }
+
   implicit def vectorToVectorPimp[T](x:Vector[T]) = VectorPimp(x) 
 }
