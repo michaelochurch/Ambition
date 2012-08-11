@@ -7,6 +7,7 @@ import Suit.{Diamond, Spade, Heart, Club}
 import java.io.{File, PrintWriter}
 
 object Ambition {
+  import Utils._
   object PointValues {
     private[this] def isHonor(r:Rank.T) = r >= RJ
 
@@ -115,6 +116,15 @@ object Ambition {
       new CardSet((cardSet - card).toSeq)
     }
 
+    def ++(cards:Iterable[Card]) = {
+      new CardSet(cardSet ++ cards)
+    }
+
+    def --(cards:Iterable[Card]):CardSet = {
+      if (cards.isEmpty) this
+      else (this remove cards.head) -- cards.tail
+    }
+
     // For data collection. 
     def csvLine = {
       val vec = {
@@ -142,28 +152,30 @@ object Ambition {
   // see the last trick but not whole round history (unless they remember it.)
   case class RoundView (
     playerId : Int,
+    d8WasPassed : Boolean,
+    roundNumber : Int,
+    passingType : PassingType,
     trickNumber : Int,
     pointsTaken : Vector[Int],
     lastTrick : Option[Trick],
-    thisTrick : Trick,
-    // TODO: investigate getting rid of .winnerSoFar. It's redundant. 
-    winnerSoFar : Int,
+    thisTrick : Option[Trick],
     hand : CardSet) {
    
     def legalMoves():CardSet = {
-      val leadPos = thisTrick.leadPos
+      val leadPos = thisTrick.get.leadPos
       if (leadPos == playerId) {
         if (trickNumber == 1) {
           // Initial lead is 8D...
           // ...unless it was passed, but I'm not handling passing yet. 
           assert(hand.contains(Card(R8, Diamond)))
+          if (d8WasPassed) println("WARNING: passed 8D not handled correctly yet.")
           CardSet(Vector(Card(R8,Diamond)))
         } else {  // Player in lead can play anything.
           hand
         }
       } else {
         val ledSuit = 
-          thisTrick.cards(leadPos) match {
+          thisTrick.get.cards(leadPos) match {
             case None       => assert(false)
             case Some(card) => card.suit
           }
@@ -171,90 +183,6 @@ object Ambition {
         if (inSuit.isEmpty) hand
         else CardSet(inSuit)
       }
-    }
-  }
-
-  // Right now, there are two TrickStrategies... (a) random legal play, and (b)
-  // ask a human. 
-  trait TrickStrategy extends Function1[RoundView, Card] {
-    val id : String
-    def randomLegalMove(v:RoundView, rng:Random) = {
-      val legalMoves = v.legalMoves.toArray
-      val idx = (rng.nextDouble() * legalMoves.length).toInt
-      legalMoves(idx)
-    }
-  }
-
-  class RandomLegalMove(private val rng:Random) extends TrickStrategy {
-    val id = "2012/07/29-Random"
-    def apply(v:RoundView):Card = {
-      randomLegalMove(v, rng)
-    }
-  }
-
-  object FromConsole extends TrickStrategy {
-    val id = "2012/07/29-FromConsole"
-    def apply(v:RoundView):Card = {
-      Display.clearScreen()
-      AmbitionDisplay.printView(v)
-
-      def loop():Card = {
-        print(" Your move?  ")
-        val input = readLine()
-        println()
-        val move = 
-          try {
-            val card = CardUtils.cardOfHumanInput(input)
-            if (v.legalMoves.contains(card)) {
-              Some(card)
-            } else {
-              println(" I know what that card is but it's not a legal play.")
-              println(" (1) You can only play a card that you hold in your hand.")
-              println(" (2) If able to follow suit (play a card in led suit) you must.")
-              println(" (3) You must lead a Diamond to the first trick, and the 8D if it was not passed to you.")
-              println(" Legal input might look like this: " + randomLegalMove(v, DefaultRNG()).toString)
-              println()
-              None
-            }
-          } catch {
-            case (e:IllegalArgumentException) => {
-              println(" I don't know how to parse that as a card: " + input)
-              println(" Legal input might look like this: " + randomLegalMove(v, DefaultRNG()).toString)
-              println()
-              None
-            }
-          }
-        move match {
-          case Some(card) => card
-          case None       => loop()
-        }
-      }
-
-      loop()
-    }
-  }
-
-  trait PassingStrategy extends Function1[RoundView, (Card, Card, Card)] {
-    val id : String
-    def randomLegalPass(rng:Random, v: RoundView) = {
-      val h = v.hand.toArray
-      assert(h.length == 13)
-      val a = Utils.randomSelect(rng, h, 3)
-      (a(0), a(1), a(2))
-    }
-  }
-
-  class RandomLegalPass(rng:Random) extends PassingStrategy {
-    val id = "2012/08/05-RandomPass"
-    def apply(v:RoundView) = {
-      randomLegalPass(rng, v)
-    }
-  }
-
-  object PassFromConsole extends PassingStrategy {
-    val id = "2012/08/05-PassFromConsole"
-    def apply(v:RoundView) = {
-      throw new Exception("not implemented")
     }
   }
 
@@ -276,7 +204,7 @@ object Ambition {
   }
 
   sealed trait RoundTime
-  case object BeforePassing extends RoundTime
+  case class AwaitingPass(playerId:Int) extends RoundTime
   case object AfterPassing extends RoundTime
   case class OnTrick(number:Int) extends RoundTime
   case object Finished extends RoundTime
@@ -284,8 +212,11 @@ object Ambition {
   // TODO: currently I represent "before trick play" with trickNumber = 0 and
   // "end of round" with 14. This is not incorrect but a bit unclear. 
   case class RoundState (
-    strategies:Vector[TrickStrategy],
+    roundNumber : Int,
+    strategies:Vector[AmbitionStrategy],
     passingType : PassingType,
+    d8WasPassed : Boolean = false,
+    passingSpace : Vector[Vector[Card]] = Vector.fill(4, 3)(null),
     rng : Random,
     roundTime : RoundTime,
     leadPos : Int,
@@ -297,8 +228,9 @@ object Ambition {
       roundTime match {
         case OnTrick(n) => n
         case Finished                       => 14 // backward compatibility.
-        case (BeforePassing | AfterPassing) => 0
-        // TODO: trickNumber shouldn't be called except during trick play.
+        case (AwaitingPass(_) | AfterPassing) => 0
+        // TODO: trickNumber shouldn't be called except during trick play. Or it should 
+        // return an option. 
       }
     }
 
@@ -309,21 +241,29 @@ object Ambition {
             finished = None)
     }
 
-    // fails if called before or after round. 
-    def currentTrick = trickHistory(trickNumber - 1).get
+    // TODO: when trickNumber return is changed to Option[Int], this will need to change too. 
+    def currentTrickOption : Option[Trick] = {
+      if (trickNumber <= 0 || trickNumber >= 14) None
+      else trickHistory(trickNumber - 1)
+    }
 
-    def activePlayer:Option[Int] =
+    // fails if called before or after round. 
+    def currentTrick : Trick = currentTrickOption.get
+
+    def activePlayer : Option[Int] =
       currentTrick.activePlayer
 
     def view(playerId:Int):RoundView = {
       val lastTrick =
         if (trickNumber < 2) None else trickHistory(trickNumber - 2)
       RoundView(playerId = playerId,
+                d8WasPassed = d8WasPassed,
+                roundNumber = roundNumber,
+                passingType = passingType,
                 trickNumber = trickNumber,
                 pointsTaken = pointsTaken,
                 lastTrick = lastTrick,
-                thisTrick = currentTrick,
-                winnerSoFar = currentTrick.winner,
+                thisTrick = currentTrickOption,
                 hand = hands(playerId))
     }
     
@@ -361,36 +301,78 @@ object Ambition {
                   else trickHistory}).markTrickFinished(trickNumber, previousScore = pointsTaken(trickWinner))
     }
 
+    // Left off here. 
+    private def performPass(fromPlayer: Int, passingType: PassingType,
+                            cards:(Card, Card, Card)) : RoundState = {
+      val cardsVector = Vector(cards._1, cards._2, cards._3)
+      val newPassingSpace = passingType match {
+        case PassLeft => passingSpace.updated((fromPlayer + 3) % 4, cardsVector)
+        case PassRight => passingSpace.updated((fromPlayer + 1) % 4, cardsVector)
+        case PassAcross => passingSpace.updated((fromPlayer + 2) % 4, cardsVector)
+        case ScatterPass => throw new Exception("not implemented")
+      }
+      this.copy(roundTime = AwaitingPass(fromPlayer + 1),
+                passingSpace = newPassingSpace,
+                hands     = hands.updateWith(fromPlayer) { cardSet => 
+                  cardSet -- cardsVector})
+    }
+
+    private def passIntoHands(hands: Vector[CardSet], passingSpace: Vector[Vector[Card]]) = {
+      hands.zip(passingSpace).map { case (hand, passedCards) => hand ++ passedCards }
+    }
+
+    def completePass : RoundState = {
+      val d8WasPassed = passingSpace.exists(_.contains(Card(R8, Diamond)))
+      val newHands = passIntoHands(hands, passingSpace)
+      this.copy(roundTime = AfterPassing,
+                d8WasPassed = d8WasPassed,
+                hands = newHands)
+    }
+
     def step():RoundState = {
-      if (trickNumber == 0) {
-        find8D()
-      } else {
-        activePlayer match {
-          case Some(playerId) => {
-            val card = strategies(playerId).apply(view(playerId))
-            playCard(playerId, card)
-          }
-          case None => {
-            resolveTrick
+      roundTime match {
+        case AwaitingPass(playerId) => {
+          if (playerId == 4)
+            // TODO: This shouldn't use AwaitingPass(4), since 4 is a nonexistent player, for
+            // "ready to complete pass". 
+            completePass
+          else {
+            val cards = strategies(playerId).passing(view(playerId))
+            performPass(playerId, passingType, cards)
           }
         }
+        case AfterPassing => find8D()
+        case OnTrick(_)   => {
+          activePlayer match {
+            case Some(playerId) => {
+              val playerView = view(playerId)
+              val card = strategies(playerId).trickPlaying(playerView)
+              playCard(playerId, card)
+            }
+            case None => {
+              resolveTrick
+            }
+          }
+        }
+        case Finished   => throw new Exception("step called on terminal RoundState")
       }
-    }  
+    }
   }
 
   def fourRandoms(rng:Random) = 
-    Vector.fill(4)(new RandomLegalMove(rng))
+    Vector.fill(4)(new RandomPlayer(rng))
 
   def threeRandomsPlusConsole(rng:Random) = 
-    FromConsole +: Vector.fill(3)(new RandomLegalMove(rng))
+    ConsolePlayer +: Vector.fill(3)(new RandomPlayer(rng))
 
   def startRound(rng:Random = DefaultRNG(), roundNumber:Int = 1)(
-    implicit strategies:Vector[TrickStrategy] = fourRandoms(rng)):RoundState = {
+    implicit strategies:Vector[AmbitionStrategy] = fourRandoms(rng)):RoundState = {
     val hands = Deck.deal(rng).map(new CardSet(_))
     RoundState(strategies = strategies,
-               passingType = PassingType(roundNumber),
                rng = rng,
-               roundTime = BeforePassing,
+               roundNumber = roundNumber,
+               passingType = PassingType(roundNumber),
+               roundTime = AwaitingPass(0),
                leadPos = 0, 
                pointsTaken = Vector.fill(4)(0),
                trickHistory = Vector.fill(13)(None), 
@@ -398,9 +380,10 @@ object Ambition {
   }
   
   def startRoundWithHands(hands:Vector[CardSet])(
-    implicit strategies:Vector[TrickStrategy] = fourRandoms(DefaultRNG())):RoundState = {
+    implicit strategies:Vector[AmbitionStrategy] = fourRandoms(DefaultRNG())):RoundState = {
     RoundState(strategies = strategies,
                rng = null, // won't be used.
+               roundNumber = 0,
                passingType = null,
                roundTime = AfterPassing,
                leadPos = 0,
@@ -420,6 +403,7 @@ object Ambition {
     RoundState(strategies = threeRandomsPlusConsole(rng),
                rng        = null,
                passingType = null,
+               roundNumber = 0,
                leadPos = 0,
                roundTime = AfterPassing,
                pointsTaken = Vector.fill(4)(0),
@@ -458,13 +442,10 @@ object Ambition {
       else                          x)
   }
 
-  
-
   def main(args:Array[String]) = {
     val rng = DefaultRNG()
-    val initRoundState = demoRoundState()
-
-      //startRound(rng)(threeRandomsPlusConsole(rng))
+    val initRoundState =
+      startRound(rng)(threeRandomsPlusConsole(rng))
     val endRoundState = playARound(initRoundState)
     AmbitionDisplay.printTrickHistory(endRoundState)
     //handScoringExperiment(1600, 1000, DefaultRNG())

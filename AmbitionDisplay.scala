@@ -157,10 +157,11 @@ object AmbitionDisplay {
                LiteralString(""))
       }
     }
+    assert(v.thisTrick != None)
     val thisTrickRows = Vector(LiteralString("Current Trick:"),
                                youAreHereRow,
                                pointsTakenRow(v.pointsTaken),
-                               rowOfTrick(v.thisTrick))
+                               rowOfTrick(v.thisTrick.get))
     Table((lastTrickRows ++ thisTrickRows):_*)
   }
 
@@ -176,18 +177,29 @@ object AmbitionDisplay {
                                                      Some(Cyan(true)))))):_*))
   }
 
+  // TODO: rename to printViewForTrick
   def printView(v:Ambition.RoundView, config:Config = DefaultConfig) = {
     println(topTableOfView(v, config).display())
     println()
     println(bottomTableOfView(v, config).display())
   }
 
-  private def viewTableForPassing(v:Ambition.RoundView, config:Config = DefaultConfig) = {
-    Table(DataRow( (MarkupCell(Left, MarkupSegment("Your hand: ")) +: v.hand.toVector.map(card => 
-                    MarkupCell(Center, displayCard(card, config)))):_*),
-          LiteralString(""))
+  def printViewForPassing(v:Ambition.RoundView, config:Config = DefaultConfig) = {
+    val table = 
+      Table(DataRow( (MarkupCell(Left, MarkupSegment("Your hand: ")) +: v.hand.toVector.map(card => 
+        MarkupCell(Center, displayCard(card, config)))):_*),
+            LiteralString(""),
+            LiteralString(" Please select 3 cards to pass %s".format( 
+              v.passingType match {
+                case Ambition.PassLeft  => "to your LEFT."
+                case Ambition.PassRight => "to your RIGHT."
+                case Ambition.PassAcross => "ACROSS."
+                case Ambition.ScatterPass => "SCATTERED (1st to left, 2nd across, 3rd right)."
+              })))
+    println(table.display())
   }
 
+  // TODO: trick history table should single out the viewing player's tricks in some way. 
   private def trickHistoryTable(rs:Ambition.RoundState, config:Config = DefaultConfig) = {
     Table(rs.trickHistory.map(trickOpt => rowOfTrick(trickOpt.get)):_*)
   }
