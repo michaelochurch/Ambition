@@ -195,39 +195,3 @@ object Display {
   }
 }            
 
-// This is what client code will look like...
-
-//     def pointsTable(cardDisplayMode:CardDisplayMode = Config.displayMode,
-//                     cardColoringMode:CardColoringMode = Config.coloringMode) = {
-//       import Display._
-//       import TableBuildingImplicits._
-
-//       val suitRow =
-//         if (cardDisplayMode == Unicode) 
-//           Row("", "♦",  "♠",  "♥",  "♣")
-//         else Row("", "D", "S", "H", "C")
-
-//       def rankRow(rankId:Int) = 
-//         TableRow(Cell("R:", Rank.TwoCharReprs(rankId)) +:
-//                  (0 to 3).map(i => Cell("R:", pointValues(i)(rankId).toString)))
-      
-//       val rows = {
-//         (Bar('-', "---", "--", "--") +:
-//          suitRow +:
-//          Bar('-', "-+-", "+-", "-+") +:
-//          (12 to 9 by -1).map(rankRow(_)) :+
-//          Bar('-', "-+-", "+-", "-+")) ++
-//         ((8 to 0 by -1).map(rankRow(_)) :+
-//          Bar('-', "---", "--", "--"))
-//       }
-
-//       Table(rows:_*)
-//     }
-    
-//     def displayPointsTable() = {
-//       println(pointsTable().displayString(Display.Table.Config(
-//         rowLeft = "| ", rowRight = " |", sep = " | ",
-//         columnSizes = Vector(3, 2, 2, 2, 2))))
-//     }
-//   }
-

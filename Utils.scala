@@ -1,6 +1,15 @@
 import scala.util.Random
 
 object Utils {
+  def notifyConsole(s:String) = {
+    println(s)
+    readLine()
+  }
+
+  def failwith(s:String) = {
+    throw new Exception(s)
+  }
+
   def randomInt(rng:Random, n:Int):Int = {
     (rng.nextDouble() * n).toInt
   }

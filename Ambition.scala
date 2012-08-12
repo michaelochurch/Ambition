@@ -1,5 +1,6 @@
 import scala.util.Random
 
+import AmbitionCommon._
 import CardUtils._
 import Rank.{R2, R3, R4, R5, R6, R7, R8, R9, R10, RJ, RQ, RK, RA}
 import Suit.{Diamond, Spade, Heart, Club}
@@ -380,15 +381,6 @@ object Ambition {
     }
   }
 
-  case class RoundResult(pointsTaken:Vector[Int],
-                         slams:Vector[Boolean],
-                         nils:Vector[Boolean],
-                         understrikes:Vector[Boolean],
-                         overstrikes:Vector[Boolean],
-                         nilstrikes:Vector[Boolean],
-                         pointsScored:Vector[Int],
-                         strikes:Vector[Boolean])
-
   // TODO: ignoring "pardon" rule for now. Include it. 
   def evaluateRound(state:RoundState):RoundResult = {
     val pointsTaken = state.pointsTaken
@@ -408,7 +400,7 @@ object Ambition {
     val slams = pointsTaken.map(_ >= 75)
     val nils = pointsTaken.map(_ == 0)
     val understrikes = pointsTaken.map(x => 0 < x && x < 15)
-    val overstrikes = pointsTaken.map(_ == most)
+    val overstrikes = pointsTaken.map(x => x < 75 && x == most)
     val nilstrikes = pointsTaken.map(nilIsStrike && _ == 0)
     val strikes = understrikes.zip(overstrikes).zip(nilstrikes).map {
       case ((u, o), n) => u || o || n
@@ -424,6 +416,17 @@ object Ambition {
                 pointsScored, strikes)
   }
 
+  // TODO: This (RoundResult, AllScores) thing is messy. Maybe include the AllScores fields
+  // in RoundResult?
+  case class RoundComplete(
+    trickHistory: Vector[Trick],
+    roundHistory: Vector[(RoundResult, AllScores)],
+    playerId: Int,
+    newScores: Vector[Int],
+    newStrikes: Vector[Int]
+  )
+
+
   sealed trait GameTime
   case class BeforeRound(n:Int) extends GameTime
   case class DuringRound(n:Int) extends GameTime
@@ -433,14 +436,14 @@ object Ambition {
                        rng : Random,
                        strategies : Vector[AmbitionStrategy],
                        thisRound : Option[RoundState],
-                       roundHistory : Vector[RoundResult],
+                       roundHistory : Vector[(RoundResult, AllScores)],
                        gameTime : GameTime) {
     
     def isTerminal = strikes.exists(_ >= 4)
     
     def startRound(n:Int) = {
-      roundState = RoundState.start(rng, n, strategies)
-      this.copy(thisRound = roundState,
+      val roundState = RoundState.start(rng, n, strategies)
+      this.copy(thisRound = Some(roundState),
                 gameTime = DuringRound(n))
     }
 
@@ -449,15 +452,26 @@ object Ambition {
       val newScores = scores.zip(roundResult.pointsScored).map {
         case (oldScore, roundScore) => oldScore + roundScore
       }
-      val newStrikes = strikes.zip(roundResult.strike).map {
+      val newStrikes = strikes.zip(roundResult.strikes).map {
         case (oldStrikes, strike) => oldStrikes + (if (strike) 1 else 0)
       }
       val roundNumber = thisRound.get.roundNumber
       
+      val newRoundHistory = roundHistory :+ (roundResult, AllScores(newStrikes, newScores))
+
+      for ((strategy, idx) <- strategies.zipWithIndex) {
+        strategy.notify(
+          RoundComplete(trickHistory = thisRound.get.trickHistory.map(_.get),
+                        roundHistory = newRoundHistory,
+                        playerId = idx,
+                        newStrikes = newStrikes,
+                        newScores = newScores))
+      }
+
       this.copy(scores = newScores,
                 strikes = newStrikes,
                 thisRound = None,
-                roundHistory = roundHistory :+ roundResult,
+                roundHistory = newRoundHistory,
                 gameTime = BeforeRound(roundNumber + 1))
     }
 
@@ -465,7 +479,7 @@ object Ambition {
       gameTime match {
         case BeforeRound(n) => startRound(n)
         case DuringRound(_) => {
-          roundState = thisRound.get
+          val roundState = thisRound.get
           if (roundState.isTerminal) 
             finishRound
           else 
@@ -477,13 +491,13 @@ object Ambition {
 
   object GameState {
     def start(rng:Random = DefaultRNG())(
-      strategies:Vector[AmbitionStrategy] = threeRandomsPlusConsole(rng)) = {
+      implicit strategies:Vector[AmbitionStrategy] = threeRandomsPlusConsole(rng)) = {
         GameState(scores = Vector(0, 0, 0, 0),
                   strikes = Vector(0, 0, 0, 0),
                   rng = rng,
                   strategies = strategies,
                   thisRound = None,
-                  roundHistory = Vector[RoundResult](),
+                  roundHistory = Vector[(RoundResult, AllScores)](),
                   gameTime = BeforeRound(1))                  
     }
   }
@@ -526,8 +540,23 @@ object Ambition {
                hands = demoHands)
   }
 
-  def playARound(initState:RoundState = startRound()) = {
+  def defaultRoundStart() = {
+    val rng = DefaultRNG()
+    RoundState.start(roundNumber = 1,
+                     rng = rng,
+                     strategies = fourRandoms(rng))
+  }
+
+  def playARound(initState:RoundState = defaultRoundStart()) = {
     var state = initState
+    while (!state.isTerminal) {
+      state = state.step
+    }
+    state
+  }
+
+  def playAGame(rng:Random = DefaultRNG())(strategies:Vector[AmbitionStrategy]) = {
+    var state = GameState.start()
     while (!state.isTerminal) {
       state = state.step
     }
@@ -536,10 +565,6 @@ object Ambition {
 
   def main(args:Array[String]) = {
     val rng = DefaultRNG()
-    val initRoundState =
-      RoundState.start(rng, 1, threeRandomsPlusConsole(rng))
-    val endRoundState = playARound(initRoundState)
-    AmbitionDisplay.printTrickHistory(endRoundState)
-    //handScoringExperiment(1600, 1000, DefaultRNG())
+    playAGame(rng)(threeRandomsPlusConsole(rng))
   }
 }

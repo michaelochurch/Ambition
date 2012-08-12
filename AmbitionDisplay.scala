@@ -1,8 +1,10 @@
 object AmbitionDisplay {
-  import Display._
+  import AmbitionCommon._
   import CardUtils._
+  import Display._
   import Rank.{R2, R3, R4, R5, R6, R7, R8, R9, R10, RJ, RQ, RK, RA}
   import Suit.{Club, Diamond, Heart, Spade}
+  import Utils._
   
   sealed trait CardDisplayMode
   case object ThreeCharAscii extends CardDisplayMode
@@ -64,7 +66,6 @@ object AmbitionDisplay {
     MarkupSegment(cardStr, None)
   }
 
-  // The finished parameter is to be used when displaying a round after it's over.
   def rowOfTrick(trick:Ambition.Trick, config:Config = DefaultConfig):MarkupRow = {
     def cardCell(cardOpt:Option[Card], lead:Boolean, winner:Boolean) = {
       val (left, right) = {
@@ -200,12 +201,104 @@ object AmbitionDisplay {
   }
 
   // TODO: trick history table should single out the viewing player's tricks in some way. 
-  private def trickHistoryTable(rs:Ambition.RoundState, config:Config = DefaultConfig) = {
-    Table(rs.trickHistory.map(trickOpt => rowOfTrick(trickOpt.get)):_*)
+  // i.e. the "You are here" marker. 
+
+  private def trickHistoryRows(
+    trickHistory:Vector[Ambition.Trick], config:Config = DefaultConfig) = {
+    
+    trickHistory.map(trick => rowOfTrick(trick))
   }
 
-  def printTrickHistory(rs:Ambition.RoundState, config:Config = DefaultConfig) = {
-    println(trickHistoryTable(rs, config).display())
+//   private def trickHistoryTable(
+//     trickHistory:Vector[Ambition.Trick], config:Config = DefaultConfig) = {
+//       Table(trickHistory.map(trick => rowOfTrick(trick)):_*)
+//   }
+
+//   def printTrickHistory(trickHistory:Vector[Ambition.Trick], 
+//                         config:Config = DefaultConfig) = {
+//     println(trickHistoryTable(trickHistory, config).display())
+//   }
+
+  private def roundHistoryRows(roundHistory:Vector[(RoundResult, AllScores)], 
+                                config:Config) = {
+    def cellOfPlayerOutcome(ptsScored:Int, strike:Boolean, nil:Boolean, slam:Boolean) = {
+      val segment = {
+        (strike, nil, slam) match {
+          case (false, false, false) => MarkupSegment(ptsScored.toString)
+          case (true, false, false) => {
+            if (ptsScored == 0) MarkupSegment("X", Some(Red(false)))
+            else MarkupSegment("%2d (X)".format(ptsScored), Some(Red(true)))
+          }
+          case (false, true, _) => {
+            MarkupSegment("%2d (N)".format(ptsScored), Some(Blue(true)))
+          }
+          case (true, true, _) => {
+            MarkupSegment("0 (NX)", Some(Red(true)))
+          }
+          case (false, false, true) => {
+            MarkupSegment("%2d (S)".format(ptsScored), Some(Yellow(true)))
+          }
+        }
+      }
+      MarkupCell(Center, segment)
+    }
+
+    def topRowOfRoundResult(roundNumber:Int, roundResult:RoundResult) = {
+      DataRow( (Vector(MarkupCell(Center, MarkupSegment("%2d.".format(roundNumber)))) ++
+                (0 to 3).map(i => cellOfPlayerOutcome(roundResult.pointsScored(i),
+                                                      roundResult.strikes(i),
+                                                      roundResult.nils(i),
+                                                      roundResult.slams(i)))):_*)
+    }
+
+    // TODO: include prior pts & strikes in RoundResult so there's less hackishness.
+    // OR... what I should be doing is 
+    def bottomRowOfRoundResult(newScores:Vector[Int], newStrikes:Vector[Int]) = {
+      val data = newScores.zip(newStrikes)
+      DataRow( (Vector(MarkupCell(Center, "")) ++ data.map {
+        case (pts, strikes) => MarkupCell(Center, "%d/%3d".format(strikes, pts))
+      }):_*)
+    }
+
+    // Main body of roundHistory table creation. 
+    roundHistory.zipWithIndex.flatMap {
+      case ((roundResult, allScores), idx) => {
+        Vector(LiteralString(""),
+               topRowOfRoundResult(idx + 1, roundResult),
+               Bar('-', " ", " ", " "),
+               bottomRowOfRoundResult(allScores.points, allScores.strikes))
+      }
+    }
+  }
+
+//   def printRoundHistory(roundHistory:Vector[(RoundResult, AllScores)],
+//                         config:Config = DefaultConfig) = {
+//     println(roundHistoryTable(roundHistory, config).display())
+//   }    
+
+  def endOfRoundTable(trickHistory:Vector[Ambition.Trick],
+                      roundHistory:Vector[(RoundResult, AllScores)],
+                      playerId:Int, 
+                      config:Config = DefaultConfig) = {
+    val allRows = {
+      Vector(LiteralString(" End of Round #%d".format(roundHistory.length)),
+             LiteralString(" Trick history:")) ++
+      trickHistoryRows(trickHistory, config) ++
+      Vector(LiteralString(""), LiteralString(" Round history:")) ++
+      roundHistoryRows(roundHistory, config)      
+    }
+    Table(allRows:_*)
+  }
+
+  // TODO: include the "you are here" marker. 
+  def printEndOfRound(trickHistory:Vector[Ambition.Trick],
+                      roundHistory:Vector[(RoundResult, AllScores)],
+                      playerId:Int,
+                      config:Config = DefaultConfig) = {
+    println(endOfRoundTable(trickHistory, roundHistory, playerId, config).display())
+    // TODO: abstract this out. 
+    println(" press enter to continue...")
+    readLine()
   }
 
   def main(args:Array[String]) = {
