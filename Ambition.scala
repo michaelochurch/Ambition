@@ -12,7 +12,7 @@ object Ambition {
   object PointValues {
     private[this] def isHonor(r:Rank.T) = r >= RJ
 
-    private[this] def points(r:Rank.T, s:Suit.T):Int = {
+    private[this] def pointsOldSystem(r:Rank.T, s:Suit.T):Int = {
       s match {
         case Club    => if (r == RK)            17 else 0
         case Diamond => if (r == R8)             8 else if (isHonor(r)) 3 else 1
@@ -21,8 +21,22 @@ object Ambition {
       }
     }
 
-    private[this] val pointValues = 
+    private[this] def pointsSimpleSystem(r:Rank.T, s:Suit.T):Int = {
+      s match {
+        case Club    => if (r == RK)  17 else 0
+        case Diamond => if (isHonor(r)) 3 else 1
+        case Heart   => if (isHonor(r)) 3 else if (r == R2) 10 else 1
+        case Spade   => if (isHonor(r)) 6 else 2
+      }
+    }
+
+    private[this] val pointValues = {
+      val points = AmbitionConfig.it.scoringSystem match {
+        case SimpleSystem => pointsSimpleSystem _
+        case OldSystem    => pointsOldSystem    _
+      }
       Array.tabulate(4, 13) { (s, r) => points(Rank(r), Suit(s)) }
+    }
 
     def apply(rank:Rank.T, suit:Suit.T):Int = pointValues(suit.id)(rank.id)
     
@@ -64,7 +78,12 @@ object Ambition {
     }
 
     def pointValue = {
-      cards.foldLeft(0) { (acc, cardOpt) =>
+      val intrinsicValue = 
+        AmbitionConfig.it.scoringSystem match {
+          case SimpleSystem => if (number == 1) 10 else 0
+          case OldSystem    => 0
+        }
+      cards.foldLeft(intrinsicValue) { (acc, cardOpt) =>
         cardOpt match {
           case Some(card) => acc + PointValues(card)
           case None       => acc

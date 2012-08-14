@@ -209,16 +209,6 @@ object AmbitionDisplay {
     trickHistory.map(trick => rowOfTrick(trick))
   }
 
-//   private def trickHistoryTable(
-//     trickHistory:Vector[Ambition.Trick], config:Config = DefaultConfig) = {
-//       Table(trickHistory.map(trick => rowOfTrick(trick)):_*)
-//   }
-
-//   def printTrickHistory(trickHistory:Vector[Ambition.Trick], 
-//                         config:Config = DefaultConfig) = {
-//     println(trickHistoryTable(trickHistory, config).display())
-//   }
-
   private def roundHistoryRows(roundHistory:Vector[(RoundResult, AllScores)], 
                                 config:Config) = {
     def cellOfPlayerOutcome(ptsScored:Int, strike:Boolean, nil:Boolean, slam:Boolean) = {
