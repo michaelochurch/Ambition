@@ -38,6 +38,9 @@ object PassingStrategy {
               if (words.length != 3) {
                 printf(" You must pass exactly 3 cards. That's %d.\n", words.length)
                 None
+              } else if (words.toSet.size != 3) {
+                println(" You duplicated a card. The three must be different.\n")
+                None
               } else {
                 val cards = words.map(CardUtils.cardOfHumanInput)
                 if (cards.forall(v.hand.contains(_)))
