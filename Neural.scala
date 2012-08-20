@@ -54,13 +54,20 @@ object Neural {
 
     def copy() = new Perceptron(weights, transform)
 
-    // single-threaded / mutable. 
+    // single-threaded / mutable.  fire must never change the array,
+    // updates. When we run our network against our test (as opposed to
+    // training) set, we are _not allowed_ to update the network. 
     def fire(input:Array[Double]) = {
+      // TODO: Make logging behavior configurable. 
+      //println("Entering fire: " + input.mkString("[", ", ", "]"))
+      //println("Weights are:   " + weights.mkString("[", ", ", "]"))
       fired = true
       lastInput = input
       dotProduct = weights(0)
       for ((x, i) <- input.zipWithIndex) dotProduct += x * weights(i + 1)
+      //println("dotProduct is " + dotProduct)
       output = transform(dotProduct)
+      //println("output is " + output)
       output
     }
 
@@ -130,13 +137,16 @@ object Neural {
     }
     
     def feedForward(layerIndex:Int, input:Array[Double]) = {
+      //println("Entering feedForward: " + layerIndex + input.mkString("[", ", ", "]"))
       for (perceptron <- layers(layerIndex)) {
         perceptron.fire(input)
       }
+      //println("Output is: " + layers(layerIndex).map(p => p.output).mkString("[", ", ", "]"))
       layers(layerIndex).map(p => p.output)
     }
 
     def backPropagate(layerIndex:Int, error:Array[Double], learningRate:Double) = {
+      //println("Doing a backprop: " + layerIndex + error.mkString("[", ", ", "]"))
       val backErrors = Array.fill(layers(layerIndex)(0).dim)(0.0)
       for ((perceptron, i) <- layers(layerIndex).zipWithIndex) {
         perceptron.train(error(i), learningRate)
@@ -144,19 +154,29 @@ object Neural {
           backErrors(j - 1) += error(i) * perceptron.weights(j)
         }
       }
+      //println("BackError is " + backErrors.mkString("[", ", ", "]"))
       backErrors
     }
     
     def applyUpdates() = {
       for (layer <- layers) {
         for (perceptron <- layer) {
+          //println("Applying update on a perceptron.")
+          //println("Update is: " + perceptron.updates.mkString("[", ", ", "]"))
           perceptron.applyUpdates()
         }
       }
     }
-   
-    // TODO: Write a .copy function so we can "go back in time" when training the network.  
- 
+    
+    // Using this method will seriously impede performance (which we don't care
+    // about for "batch jobs" to develop position-evaulation heuristics) but it
+    // allows us to "go back in time" when training the network.
+    def copy() = {
+      layers.map { layer => 
+        Array.tabulate(layer.length)(i => layer(i).copy)
+      }
+    }
+
     // Returns L^2 error. 
     def fullCycle(inputs:Iterable[Array[Double]], targets:Iterable[Array[Double]], learningRate:Double):Double = {
       var totalError = 0.0
@@ -173,9 +193,8 @@ object Neural {
         for (layerIndex <- layers.length - 1 to 0 by -1) {
           currentBackSignal = backPropagate(layerIndex, currentBackSignal, learningRate)
         }
-        
-        applyUpdates()
       }
+      applyUpdates()
       println("Total L^2 error: " + totalError)
       totalError
     }
@@ -211,5 +230,22 @@ object Neural {
         network.fullCycle1(XorInputs, XorTargets, 0.1)
       network
     }
+    
+    // TODO: bad learning rate leads to divergent networks. Figure out a
+    // reasonable way to calculate it based on expected behavior of data. 
+    def demo2(nSteps:Int) = {
+      def f(x:Double, y:Double, z:Double, w:Double) = -0.3 * x - 0.5 * y * z + 0.7 * y + (w * w * w * w * w)
+      val range = -1.0 to 1.0 by 0.5
+      val FInputs = for (x <- range; y <- range; z <- range; w <- range) yield Array(x, y, z, w)
+      val FTargets = FInputs.map(a => f(a(0), a(1), a(2), a(3)))
+      val network = apply(Array(4, 18, 1), Array(ArctanTransform, IdentityTransform))
+      for (i <- 1 to nSteps)
+        network.fullCycle1(FInputs, FTargets, 0.00000001)
+      network
+    }
+  }
+
+  def main(args:Array[String]) = {
+    LayeredNetwork.demo2(250)
   }
 }
