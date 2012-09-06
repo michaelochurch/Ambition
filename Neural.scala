@@ -67,11 +67,10 @@ object Neural {
     var output      = 0.0
     var error       = 0.0
 
-
     def copy() = new Perceptron(weights.clone, transform)
 
     // single-threaded / mutable.  fire must never change the array,
-    // updates. When we run our network against our test (as opposed to
+    // gradient. When we run our network against our test (as opposed to
     // training) set, we are _not allowed_ to update the network. 
     def fire(input:Array[Double]) = {
       // TODO: Make logging behavior configurable. 
@@ -266,10 +265,6 @@ object Neural {
       }
       new LayeredNetwork(layers.toArray)
     }
-  }
-
-  def main(args:Array[String]) = {
-    LayeredNetwork.demo2(250)
   }
 
   // Solver, which trains a neural network using a learning rate that increases
