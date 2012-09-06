@@ -400,6 +400,13 @@ object Ambition {
     }
   }
 
+  // Experimental rule: variable Slam bonus. 
+  // 75 <= T <   95    |->   50 +     (T - 75)   (50 to 70)
+  // 96 <= T <= 120    |->   70 + 2 * (T - 95)   (72 to 120)
+  def slamBonus(pts:Int):Int = {
+    if (pts < 95) pts - 25 else pts * 2 - 120
+  }
+
   // TODO: ignoring "pardon" rule for now. Include it. 
   def evaluateRound(state:RoundState):RoundResult = {
     val pointsTaken = state.pointsTaken
@@ -425,7 +432,7 @@ object Ambition {
       case ((u, o), n) => u || o || n
     }
     val pointsScored = pointsTaken.map(x => 
-      if      (x >= 75)            60  // Slam
+      if      (x >= 75)             slamBonus(x)
       else if (!slamOccurred && 
                         x == most)  0  // Overstrike
       else if (x == 0)       nilValue  // Nil   
@@ -575,11 +582,19 @@ object Ambition {
   }
 
   def playAGame(rng:Random = DefaultRNG())(strategies:Vector[AmbitionStrategy]) = {
-    var state = GameState.start()
+    var state = GameState.start(rng)(strategies)
     while (!state.isTerminal) {
       state = state.step
     }
     state
+  }
+
+  def oneGameAtConsole(rng:Random = DefaultRNG()) = { 
+    playAGame(rng)(threeRandomsPlusConsole(rng))
+  }
+
+  def oneRandomGame(rng:Random = DefaultRNG()) = {
+    playAGame(rng)(fourRandoms(rng))
   }
 
   def main(args:Array[String]) = {

@@ -226,7 +226,7 @@ object AmbitionDisplay {
             MarkupSegment("0 (NX)", Some(Red(true)))
           }
           case (false, false, true) => {
-            MarkupSegment("%2d (S)".format(ptsScored), Some(Yellow(true)))
+            MarkupSegment("%-3d(S)".format(ptsScored), Some(Yellow(true)))
           }
         }
       }
@@ -260,11 +260,6 @@ object AmbitionDisplay {
       }
     }
   }
-
-//   def printRoundHistory(roundHistory:Vector[(RoundResult, AllScores)],
-//                         config:Config = DefaultConfig) = {
-//     println(roundHistoryTable(roundHistory, config).display())
-//   }    
 
   def endOfRoundTable(trickHistory:Vector[Ambition.Trick],
                       roundHistory:Vector[(RoundResult, AllScores)],
