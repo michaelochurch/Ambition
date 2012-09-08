@@ -401,10 +401,13 @@ object Ambition {
   }
 
   // Experimental rule: variable Slam bonus. 
-  // 75 <= T <   95    |->   50 +     (T - 75)   (50 to 70)
-  // 96 <= T <= 120    |->   70 + 2 * (T - 95)   (72 to 120)
+  // 75  <= T <  105    |->   50 +     (T - 75)    (50 to 79)
+  // 105 <= T <  120    |->   80 + 2 * (T - 105)   (80 to 108)
+  // 120                |->  120
   def slamBonus(pts:Int):Int = {
-    if (pts < 95) pts - 25 else pts * 2 - 120
+    if (pts < 105) pts - 25
+    else if (pts < 120) pts * 2 - 130
+    else 120
   }
 
   // TODO: ignoring "pardon" rule for now. Include it. 
@@ -416,8 +419,9 @@ object Ambition {
     val underOccurred = pointsTaken.exists(x => 0 < x && x < 15)
     val (nilValue, nilIsStrike) =
       (slamOccurred, numberOfNils, underOccurred) match {
-        case (true, (2 | 3), _)  => (0, true)
-        case (true, 1, false)    => (0, true)
+        case (true, 3, _)        => (0, true)
+        case (true, 2, true)     => (15, true)
+        case (true, _, false)    => (0, true)
         case (true, 1, true)     => (30, false)
         case (false, 2, _)       => (15, false)
         case (false, 1, _)       => (30, false)
