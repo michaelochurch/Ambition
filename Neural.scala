@@ -10,8 +10,10 @@
 // will be frequently copying network states, and treating them as immutable
 // outside of training.
 
-import scala.util.Random
+import java.io.{File, PrintWriter}
 import scala.collection.mutable.ArrayBuffer
+import scala.io.Source
+import scala.util.Random
 
 object Neural {
   val DefaultRNG = new Random()
@@ -37,6 +39,15 @@ object Neural {
     
     def apply(x:Double):Double
     def derivative(x:Double):Double
+  }
+
+  object PerceptronTransform {
+    def get(s:String) = {
+      s.toLowerCase match {
+        case "identitytransform" => IdentityTransform
+        case "arctantransform"   => ArctanTransform
+      }
+    }
   }
 
   object IdentityTransform extends PerceptronTransform {
@@ -122,9 +133,20 @@ object Neural {
     def l2Error(data:Iterable[Array[Double]], targets:Iterable[Double]) = {
       average(data.zip(targets).map { case (input, target) => math.pow((target - apply(input)), 2.0) })
     }
+
+    def toCsvLine() = {
+      (transform.name +: weights).mkString("", ",", "\n")
+    }
   }
 
   object Perceptron {
+    def ofCsvLine(line:String) = {
+      val cells = line.split(",")     // incorrect CSV, but will work for our inputs. 
+      val transform = PerceptronTransform.get(cells(0))
+      val weights = cells.drop(1).map(_.toDouble)
+      new Perceptron(weights, transform)
+    }
+
     def demo() = {
       val Bit = Array(0.0, 1.0)
       val data = for (i <- Bit;
@@ -255,6 +277,20 @@ object Neural {
     def l2Error(ds:DataSet) = {
       average(ds.inputs.zip(ds.targets).map { case (input, target) => math.pow((apply(input) - target), 2.0) })
     }
+
+    def toCsvLines() = {
+      layers.flatMap(layer => 
+        "Layer,%d\n".format(layer.length) +: layer.map(p => p.toCsvLine))
+    }
+
+    def dumpToFile(filename:String) = {
+      val writer = new PrintWriter (new File(filename))
+      for (line <- toCsvLines()) {
+        writer.write(line)
+      }
+      writer.flush()
+      writer.close()
+    }
   }
 
   object LayeredNetwork {
@@ -264,6 +300,23 @@ object Neural {
         layers.append(Array.fill(spec(i))(new Perceptron(spec(i - 1), transforms(i - 1))))
       }
       new LayeredNetwork(layers.toArray)
+    }
+
+    def ofCsvLines(lines:IndexedSeq[String]) = {
+      val layers = new ArrayBuffer[Array[Perceptron]]()
+      var pos = 0
+      while (pos < lines.length) {
+        val cells = lines(pos).split(",") 
+        assert(cells.length == 2 && cells(0) == "Layer")
+        val nLines = cells(1).toInt
+        layers.append(Array.tabulate(nLines)(i => Perceptron.ofCsvLine(lines(pos + i + 1))))
+        pos = pos + nLines + 1
+      }
+      new LayeredNetwork(layers.toArray)
+    }
+    
+    def snortFile(filename:String) = {
+      ofCsvLines(Vector() ++ Source.fromFile(filename).getLines)
     }
   }
 
