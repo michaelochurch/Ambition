@@ -172,7 +172,6 @@ object Ambition {
   // see the last trick but not whole round history (unless they remember it.)
   case class RoundView (
     playerId : Int,
-    d8WasPassed : Boolean,
     roundNumber : Int,
     passingType : PassingType,
     trickNumber : Int,
@@ -186,9 +185,7 @@ object Ambition {
       if (leadPos == playerId) {
         if (trickNumber == 1) {
           assert(hand.contains(Card(R8, Diamond)))
-          if (d8WasPassed) 
-            CardSet(hand.filter(c => c.suit == Diamond))
-          else CardSet(Vector(Card(R8,Diamond)))
+          CardSet(hand.filter(c => c.suit == Diamond))
         } else {  // Tricks 2-13: Player in lead can play anything.
           hand
         }
@@ -234,7 +231,6 @@ object Ambition {
     roundNumber : Int,
     strategies:Vector[AmbitionStrategy],
     passingType : PassingType,
-    d8WasPassed : Boolean = false,
     passingSpace : Vector[Vector[Card]] = Vector.fill(4, 3)(null),
     rng : Random,
     roundTime : RoundTime,
@@ -276,7 +272,6 @@ object Ambition {
       val lastTrick =
         if (trickNumber < 2) None else trickHistory(trickNumber - 2)
       RoundView(playerId = playerId,
-                d8WasPassed = d8WasPassed,
                 roundNumber = roundNumber,
                 passingType = passingType,
                 trickNumber = trickNumber,
@@ -348,10 +343,8 @@ object Ambition {
     }
 
     def completePass : RoundState = {
-      val d8WasPassed = passingSpace.exists(_.contains(Card(R8, Diamond)))
       val newHands = passIntoHands(hands, passingSpace)
       this.copy(roundTime = AfterPassing,
-                d8WasPassed = d8WasPassed,
                 hands = newHands)
     }
 
